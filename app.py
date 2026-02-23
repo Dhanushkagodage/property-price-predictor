@@ -251,23 +251,244 @@ python explainability.py
             st.markdown("---")
 
             # SHAP explanation for this prediction
-            st.subheader("Why This Price? (SHAP Explanation)")
+            st.subheader("Why This Price?")
             try:
                 X_train = load_training_data()
                 explainer = load_shap_explainer(model, X_train)
                 shap_value = explainer(features_df)
 
-                fig, ax = plt.subplots(figsize=(10, 5))
-                shap.plots.waterfall(shap_value[0], show=False)
-                plt.title("Feature Contributions to This Prediction", fontsize=13)
+                # Extract SHAP values
+                shap_vals = shap_value[0].values
+                base_log = shap_value[0].base_values
+                feat_names = list(features_df.columns)
+                base_price = np.expm1(base_log)
+
+                # ─── Group related features ───────────────────────
+                group_map = {
+                    "house_size": "House Size",
+                    "log_house_size": "House Size",
+                    "has_house_size": "House Size",
+                    "land_size": "Land Size",
+                    "log_land_size": "Land Size",
+                    "has_land_size": "Land Size",
+                    "bedrooms": "Bedrooms",
+                    "total_rooms": "Bedrooms",
+                    "bathrooms": "Bathrooms",
+                    "bed_bath_ratio": "Bathrooms",
+                    "district_encoded": "District",
+                    "property_type_encoded": "Property Type",
+                    "is_apartment": "Property Type",
+                }
+
+                # User-friendly labels with actual values
+                group_labels = {
+                    "House Size": f"House Size ({house_size} sqft)" if house_size > 0 else "House Size (N/A)",
+                    "Land Size": f"Land Size ({land_size} perch)" if land_size > 0 else "Land Size (N/A)",
+                    "Bedrooms": f"Bedrooms ({bedrooms})",
+                    "Bathrooms": f"Bathrooms ({bathrooms})",
+                    "District": f"District ({district})",
+                    "Property Type": f"Property Type ({property_type})",
+                }
+
+                # Sum SHAP values in log-space per group
+                grouped_log = {}
+                for i, name in enumerate(feat_names):
+                    grp = group_map.get(name, name)
+                    grouped_log[grp] = grouped_log.get(grp, 0) + shap_vals[i]
+
+                # Convert grouped log-space values to LKR impact
+                grouped = {}
+                for grp, log_impact in grouped_log.items():
+                    lkr_impact = (np.expm1(base_log + log_impact) - base_price) / 1e6
+                    grouped[grp] = lkr_impact
+
+                # Sort by absolute impact (largest first)
+                sorted_groups = sorted(grouped.items(), key=lambda x: abs(x[1]), reverse=True)
+
+                # ─── Info box: What is SHAP? ──────────────────────
+                st.info(
+                    "**How to read this chart:** The model starts from the **average price** "
+                    f"of all properties in the dataset (**Rs {base_price/1e6:.1f}M**). "
+                    "Then each feature **pushes the price up (green)** or **pulls it down (red)** "
+                    "based on your input values compared to the dataset average. "
+                    "The final bar shows **your predicted price**."
+                )
+
+                # ─── Waterfall Bar Chart ──────────────────────────
+                labels = ["Average\nPrice"]
+                values = [base_price / 1e6]
+                colors = ["#90A4AE"]
+                annotations = [f"Rs {base_price/1e6:.1f}M"]
+
+                running = base_price / 1e6
+                for grp, impact in sorted_groups:
+                    lbl = group_labels.get(grp, grp)
+                    labels.append(lbl.replace(" (", "\n("))
+                    running += impact
+                    values.append(impact)
+                    if impact >= 0:
+                        colors.append("#4CAF50")
+                        annotations.append(f"+{impact:.1f}M")
+                    else:
+                        colors.append("#F44336")
+                        annotations.append(f"{impact:.1f}M")
+
+                labels.append("Your\nPrice")
+                values.append(predicted_price / 1e6)
+                colors.append("#1A237E")
+                annotations.append(f"Rs {predicted_price/1e6:.1f}M")
+
+                # Build waterfall coordinates
+                n = len(labels)
+                bottoms = [0.0] * n
+                heights = [0.0] * n
+
+                # First bar: Average Price
+                bottoms[0] = 0
+                heights[0] = values[0]
+                cumulative = values[0]
+
+                # Middle bars: feature impacts
+                for i in range(1, n - 1):
+                    if values[i] >= 0:
+                        bottoms[i] = cumulative
+                        heights[i] = values[i]
+                    else:
+                        bottoms[i] = cumulative + values[i]
+                        heights[i] = abs(values[i])
+                    cumulative += values[i]
+
+                # Last bar: Your Price
+                bottoms[-1] = 0
+                heights[-1] = values[-1]
+
+                fig, ax = plt.subplots(figsize=(max(12, n * 1.5), 6))
+                x = np.arange(n)
+                bars = ax.bar(x, heights, bottom=bottoms, color=colors,
+                              width=0.6, edgecolor="white", linewidth=1.5)
+
+                # Add connecting lines between bars
+                for i in range(n - 2):
+                    top_i = bottoms[i] + heights[i] if values[i] >= 0 else bottoms[i]
+                    if i == 0:
+                        top_i = heights[0]
+                    conn_y = bottoms[i] + heights[i]
+                    ax.plot([x[i] + 0.3, x[i + 1] - 0.3], [conn_y, conn_y],
+                            color="#BDBDBD", linewidth=1.2, linestyle="--")
+
+                # Add value annotations above/below bars
+                for i, bar in enumerate(bars):
+                    y_pos = bottoms[i] + heights[i] + (max(heights) * 0.02)
+                    fontw = "bold" if i == 0 or i == n - 1 else "normal"
+                    fontsz = 11 if i == 0 or i == n - 1 else 10
+                    color = colors[i] if i > 0 and i < n - 1 else "#1A237E"
+                    ax.text(x[i], y_pos, annotations[i],
+                            ha="center", va="bottom", fontsize=fontsz,
+                            fontweight=fontw, color=color)
+
+                ax.set_xticks(x)
+                ax.set_xticklabels(labels, fontsize=9, ha="center")
+                ax.set_ylabel("Price (Million LKR)", fontsize=12)
+                ax.set_title("How Each Feature Affects the Predicted Price",
+                             fontsize=14, fontweight="bold", pad=15)
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+                ax.set_ylim(bottom=0)
+
+                # Add legend
+                from matplotlib.patches import Patch
+                legend_elements = [
+                    Patch(facecolor="#90A4AE", label="Average / Final price"),
+                    Patch(facecolor="#4CAF50", label="Increases price"),
+                    Patch(facecolor="#F44336", label="Decreases price"),
+                ]
+                ax.legend(handles=legend_elements, loc="upper right", fontsize=9)
+
                 plt.tight_layout()
                 st.pyplot(fig)
                 plt.close()
 
-                st.caption(
-                    "The waterfall chart shows how each feature pushes the prediction "
-                    "higher (red) or lower (blue) from the average predicted price."
+                # ─── Detailed Feature Breakdown Table ─────────────
+                st.markdown("---")
+                st.markdown("#### Feature Contribution Breakdown")
+
+                total_positive = sum(v for _, v in sorted_groups if v > 0)
+                total_negative = sum(v for _, v in sorted_groups if v < 0)
+                total_impact = total_positive + total_negative
+
+                inc_col, dec_col = st.columns(2)
+
+                with inc_col:
+                    st.markdown("**:green[Features that INCREASED the price:]**")
+                    for grp, impact in sorted_groups:
+                        if impact > 0:
+                            lbl = group_labels.get(grp, grp)
+                            pct = (impact / abs(total_impact)) * 100 if total_impact != 0 else 0
+                            st.markdown(
+                                f"- **{lbl}** → **+Rs {impact:.1f}M** "
+                                f"({pct:.0f}% of total change)"
+                            )
+
+                with dec_col:
+                    st.markdown("**:red[Features that DECREASED the price:]**")
+                    for grp, impact in sorted_groups:
+                        if impact < 0:
+                            lbl = group_labels.get(grp, grp)
+                            pct = (abs(impact) / abs(total_impact)) * 100 if total_impact != 0 else 0
+                            st.markdown(
+                                f"- **{lbl}** → **Rs {impact:.1f}M** "
+                                f"({pct:.0f}% of total change)"
+                            )
+
+                # ─── Step-by-step calculation ─────────────────────
+                st.markdown("---")
+                st.markdown("#### How the Prediction Was Calculated")
+
+                calc_lines = [
+                    f"1. **Start** with the average property price: **Rs {base_price/1e6:.1f} Million**",
+                    f"   _(This is the average predicted price across all ~1,100 properties in our dataset)_",
+                    "",
+                ]
+                step = 2
+                running_price = base_price / 1e6
+                for grp, impact in sorted_groups:
+                    lbl = group_labels.get(grp, grp)
+                    running_price += impact
+                    if impact >= 0:
+                        calc_lines.append(
+                            f"{step}. **{lbl}** pushes price **up** by Rs {impact:.1f}M "
+                            f"→ Running total: **Rs {running_price:.1f}M**"
+                        )
+                    else:
+                        calc_lines.append(
+                            f"{step}. **{lbl}** pulls price **down** by Rs {abs(impact):.1f}M "
+                            f"→ Running total: **Rs {running_price:.1f}M**"
+                        )
+                    step += 1
+
+                calc_lines.append("")
+                calc_lines.append(
+                    f"**Final Predicted Price = Rs {predicted_price/1e6:.1f} Million**"
                 )
+
+                st.markdown("\n".join(calc_lines))
+
+                # ─── Why negative/positive explanation ────────────
+                st.markdown("---")
+                st.markdown("#### Understanding Positive & Negative Values")
+                st.markdown(
+                    "SHAP values are **relative to the dataset average**. "
+                    "A feature shows a **negative** impact when your input is "
+                    "**below the average** for that feature in the dataset, and "
+                    "**positive** when it is **above average**.\n\n"
+                    "**Example:** If the average house size in the dataset is ~2,200 sqft "
+                    "and you entered 1,300 sqft, that is below average — so House Size "
+                    "pulls the price **down**. If you enter 5,000 sqft (above average), "
+                    "it would push the price **up**.\n\n"
+                    "_The same logic applies to all features: District, Bedrooms, "
+                    "Land Size, etc._"
+                )
+
             except Exception as e:
                 st.warning(f"Could not generate SHAP explanation: {e}")
 
