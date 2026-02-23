@@ -46,6 +46,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Hide Deploy button and hamburger menu
+st.markdown(
+    """
+    <style>
+        .stAppDeployButton {display: none;}
+        [data-testid="stToolbar"] {display: none;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ─── Model Loading ───────────────────────────────────────────────────────────
 
 
