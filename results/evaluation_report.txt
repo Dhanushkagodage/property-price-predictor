@@ -1,0 +1,34 @@
+============================================================
+MODEL EVALUATION REPORT
+============================================================
+Model: XGBoost Regressor
+Target: log(1 + price)
+
+--- Training Set ---
+  RMSE (log): 0.3324
+  MAE (log): 0.2472
+  R2 (log): 0.8049
+  RMSE (LKR): Rs 29,885,061
+  MAE (LKR): Rs 14,457,865
+  R2 (LKR): Rs 1
+  MAPE (%): 25.2618
+
+--- Validation Set ---
+  RMSE (log): 0.3918
+  MAE (log): 0.2745
+  R2 (log): 0.6858
+  RMSE (LKR): Rs 24,924,652
+  MAE (LKR): Rs 13,712,215
+  R2 (LKR): Rs 1
+  MAPE (%): 27.6021
+
+--- Test Set ---
+  RMSE (log): 0.4468
+  MAE (log): 0.3195
+  R2 (log): 0.6443
+  RMSE (LKR): Rs 37,655,329
+  MAE (LKR): Rs 19,311,520
+  R2 (LKR): Rs 1
+  MAPE (%): 33.1556
+
+============================================================

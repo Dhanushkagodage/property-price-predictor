@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+data/listings_checkpoint.csv
+data/details_checkpoint.csv
+.claude/
